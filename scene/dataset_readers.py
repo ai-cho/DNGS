@@ -114,6 +114,14 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
             focal_length_y = intr.params[1]
             FovY = focal2fov(focal_length_y, height)
             FovX = focal2fov(focal_length_x, width)
+
+        elif intr.model == "OPENCV": # for nerfbusters
+            focal_length_x = intr.params[0]
+            focal_length_y = intr.params[1]
+            cx = intr.params[2]
+            cy = intr.params[3]
+            FovY = focal2fov(focal_length_y, cy * 2)
+            FovX = focal2fov(focal_length_x, cx * 2)
         else:
             assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported but found {}!".format(intr.model)
 
@@ -124,6 +132,7 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         # monocular depth
         ## (fix path)
         depth_mono_path = os.path.join('/'.join(images_folder.split("/")[:-1]), 'depth_maps', 'depth_' + os.path.basename(extr.name).split(".")[0] + '.png')
+        # depth_mono_path = os.path.join('/'.join(images_folder.split("/")[:-1]), 'depth_maps', os.path.basename(extr.name).split(".")[0] + '.png')
         depth_mono = Image.open(depth_mono_path)
 
         cam_info = CameraInfo(uid=image_path, R=R, T=T, FovY=FovY, FovX=FovX, image=image, depth_mono=depth_mono,
@@ -168,30 +177,36 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
         cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
-    # print(cam_intrinsics)
 
     reading_dir = "images" if images == None else images
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     if eval:
-        print("Dataset Type: ", dataset)
+        # print("Dataset Type: ", dataset)
         if dataset == "LLFF":
-            train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
-            eval_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
-            if N_sparse > 0:
-                idx = list(range(len(train_cam_infos)))
-                idx_train = np.linspace(0, len(train_cam_infos) - 1, N_sparse)
-                idx_train = [round(i) for i in idx_train]
-                idx_test = [i for i in idx if i not in idx_train] 
-                train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if idx in idx_train]
-                test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in idx_test] + eval_cam_infos
+            # train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
+            # eval_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+            # if N_sparse > 0:
+            #     idx = list(range(len(train_cam_infos)))
+            #     idx_train = np.linspace(0, len(train_cam_infos) - 1, N_sparse)
+            #     idx_train = [round(i) for i in idx_train]
+            #     idx_test = [i for i in idx if i not in idx_train] 
+            #     train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if idx in idx_train]
+            #     test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in idx_test] + eval_cam_infos
 
-                # print('train', idx_train)
-                # print('test', train_cam_infos)
+            #     print('train', idx_train)
+            #     print('test', train_cam_infos)
             # else:
             #     train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
             #     test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+
+            train_cam_infos = [c for c in cam_infos if "frame_1_" in c.image_path]  # Train: frame_1_00*.png
+            eval_cam_infos = [c for c in cam_infos if "frame_0" in c.image_path]  # Test: frame_00*.png
+            test_cam_infos = eval_cam_infos
+
+            print(len(train_cam_infos), len(eval_cam_infos))
+
         elif dataset == "DTU":
             train_idx = [25, 22, 28, 40, 44, 48, 0, 8, 13]
             exclude_idx = [3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 36, 37, 38, 39]
@@ -201,6 +216,24 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
             train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in train_idx]
             test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in test_idx]
             eval_cam_infos = test_cam_infos
+
+
+        elif dataset == "curated":
+            train_cam_infos = [c for c in cam_infos if "frame_1_" in c.image_path]  # Train: frame_1_00*.png
+            eval_cam_infos = [c for c in cam_infos if "frame_0" in c.image_path]  # Test: frame_00*.png
+            test_cam_infos = eval_cam_infos
+            # print(len(train_cam_infos), len(eval_cam_infos))
+            # if N_sparse > 0:
+            #     idx = list(range(len(train_cam_infos)))
+            #     idx_train = np.linspace(0, len(train_cam_infos) - 1, N_sparse)
+            #     idx_train = [round(i) for i in idx_train]
+            #     idx_test = [i for i in idx if i not in idx_train] 
+
+            #     train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if idx in idx_train]
+            #     test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in idx_test] + eval_cam_infos
+
+            print(len(train_cam_infos), len(eval_cam_infos))
+
         else:
             raise NotImplementedError
     else:
@@ -238,6 +271,7 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
             pcd_shape = (topk_(xyz, 100, 0)[-1] + topk_(-xyz, 100, 0)[-1])
             num_pts = 10_00
             xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 100, 0)[-1] # - 0.15 * pcd_shape
+
         print(pcd_shape)
         print(f"Generating random point cloud ({num_pts})...")
 
@@ -336,8 +370,8 @@ def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, llffhold=8, N_
         eval_cam_infos = []
 
 
-    print('train', [info.image_path for info in train_cam_infos])
-    print('eval', [info.image_path for info in eval_cam_infos])
+    # print('train', [info.image_path for info in train_cam_infos])
+    # print('eval', [info.image_path for info in eval_cam_infos])
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 

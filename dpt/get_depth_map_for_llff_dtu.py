@@ -26,6 +26,9 @@ if args.benchmark=="DTU":
 elif args.benchmark=="LLFF":
     model_type = "DPT_Hybrid"
     scenes = ["fern", "flower", "fortress", "horns", "leaves", "orchids", "room", "trex"]
+elif args.benchmark=='curated':
+    model_type = 'DPT_Hybrid'
+    scenes=['aloe', 'art', 'century', 'flowers', 'garbage', 'picnic', 'roses']
 
 midas = torch.hub.load("intel-isl/MiDaS", model_type)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -55,13 +58,23 @@ for dataset_id in scenes:
 
     elif args.benchmark=="LLFF":
         root_path_1 = root_path+dataset_id+'/images/*.JPG'
-        root_path_2 = root_path+dataset_id+'/images/*.jpg'
+        # root_path_2 = root_path+dataset_id+'/images/*.jpg'
+        root_path_2 = root_path+dataset_id+'/images/*.png'
         image_paths_1 = sorted(glob.glob(root_path_1))
         image_paths_2 = sorted(glob.glob(root_path_2))
         image_path_pkg = [image_paths_1, image_paths_2]
         # root_path = root_path+'/*png'
         downsampling = 8
 
+    elif args.benchmark=='curated':
+        root_path_1 = root_path+dataset_id+'/images/*.JPG'
+        # root_path_2 = root_path+dataset_id+'/images/*.jpg'
+        root_path_2 = root_path+dataset_id+'/images/*.png'
+        image_paths_1 = sorted(glob.glob(root_path_1))
+        image_paths_2 = sorted(glob.glob(root_path_2))
+        image_path_pkg = [image_paths_1, image_paths_2]
+        # root_path = root_path+'/*png'
+        downsampling = 1
 
     output_path = os.path.join(root_path+dataset_id, 'depth_maps')
 

@@ -129,7 +129,6 @@ def read_points3D_binary(path_to_model_file):
         void Reconstruction::WritePoints3DBinary(const std::string& path)
     """
 
-
     with open(path_to_model_file, "rb") as fid:
         num_points = read_next_bytes(fid, 8, "Q")[0]
 
@@ -152,6 +151,30 @@ def read_points3D_binary(path_to_model_file):
             rgbs[p_id] = rgb
             errors[p_id] = error
     return xyzs, rgbs, errors
+
+def read_points3D_binary_npy(path_to_model_file):
+    points3D = {}
+    with open(path_to_model_file, "rb") as fid:
+        num_points = read_next_bytes(fid, 8, "Q")[0]
+        for point_line_index in range(num_points):
+            binary_point_line_properties = read_next_bytes(
+                fid, num_bytes=43, format_char_sequence="QdddBBBd")
+            point3D_id = binary_point_line_properties[0]
+            xyz = np.array(binary_point_line_properties[1:4])
+            rgb = np.array(binary_point_line_properties[4:7])
+            error = np.array(binary_point_line_properties[7])
+            track_length = read_next_bytes(
+                fid, num_bytes=8, format_char_sequence="Q")[0]
+            track_elems = read_next_bytes(
+                fid, num_bytes=8*track_length,
+                format_char_sequence="ii"*track_length)
+            image_ids = np.array(tuple(map(int, track_elems[0::2])))
+            point2D_idxs = np.array(tuple(map(int, track_elems[1::2])))
+            points3D[point3D_id] = Point3D(
+                id=point3D_id, xyz=xyz, rgb=rgb,
+                error=error, image_ids=image_ids,
+                point2D_idxs=point2D_idxs)
+    return points3D
 
 def read_intrinsics_text(path):
     """
