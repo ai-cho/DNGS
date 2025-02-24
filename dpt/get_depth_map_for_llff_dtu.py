@@ -27,9 +27,11 @@ elif args.benchmark=="LLFF":
     model_type = "DPT_Hybrid"
     scenes = ["fern", "flower", "fortress", "horns", "leaves", "orchids", "room", "trex"]
 elif args.benchmark=='curated':
-    model_type = 'DPT_Hybrid'
+    model_type = 'DPT_Large'
     scenes=['aloe', 'art', 'century', 'flowers', 'garbage', 'picnic', 'roses']
-
+elif args.benchmark=='others':
+    scenes = ['pipe', 'table']
+    
 midas = torch.hub.load("intel-isl/MiDaS", model_type)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 midas.to(device)
@@ -64,9 +66,19 @@ for dataset_id in scenes:
         image_paths_2 = sorted(glob.glob(root_path_2))
         image_path_pkg = [image_paths_1, image_paths_2]
         # root_path = root_path+'/*png'
-        downsampling = 8
+        downsampling = 1
 
     elif args.benchmark=='curated':
+        root_path_1 = root_path+dataset_id+'/images/*.JPG'
+        # root_path_2 = root_path+dataset_id+'/images/*.jpg'
+        root_path_2 = root_path+dataset_id+'/images/*.png'
+        image_paths_1 = sorted(glob.glob(root_path_1))
+        image_paths_2 = sorted(glob.glob(root_path_2))
+        image_path_pkg = [image_paths_1, image_paths_2]
+        # root_path = root_path+'/*png'
+        downsampling = 1
+
+    elif args.benchmark=='others':
         root_path_1 = root_path+dataset_id+'/images/*.JPG'
         # root_path_2 = root_path+dataset_id+'/images/*.jpg'
         root_path_2 = root_path+dataset_id+'/images/*.png'

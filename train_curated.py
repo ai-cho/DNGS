@@ -10,17 +10,16 @@
 #
 
 import os
-import time
 import torch
 import torchvision
 from os import makedirs
 from random import randint
 from utils.graphics_utils import fov2focal
-from utils.loss_utils import l1_loss, loss_depth_smoothness, patch_norm_mse_loss, patch_norm_mse_loss_global, ssim
+from utils.loss_utils import l1_loss, patch_norm_mse_loss, patch_norm_mse_loss_global, ssim
 # from utils.loss_utils import mssim as ssim
-from gaussian_renderer import render, render_for_depth, render_for_opa  # , network_gui
+from gaussian_renderer import render, render_for_depth, render_for_opa   # , network_gui
 import sys
-from scene import RenderScene, Scene, GaussianModel
+from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
 import uuid
 from tqdm import tqdm
@@ -36,16 +35,13 @@ except ImportError:
 
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, near_range):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset, opt)
     gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
-    scene_sprical = RenderScene(dataset, gaussians, spiral=True)
     gaussians.training_setup(opt)
     if checkpoint:
-        # (model_params, first_iter) = torch.load(checkpoint)
-        # gaussians.restore(model_params, opt)
         (model_params, _) = torch.load(checkpoint)
         gaussians.load_shape(model_params, opt)
 
@@ -56,14 +52,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     iter_end = torch.cuda.Event(enable_timing = True)
 
     viewpoint_stack = None
-    viewpoint_sprical_stack = None
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress", ascii=True, dynamic_ncols=True)
     first_iter += 1
 
-    patch_range = (5, 17) # LLFF
+    ema_loss_hard = 0.0
 
-    time_accum = 0
+    if args.dataset == 'DTU':
+        patch_range = (17, 53)
 
     for iteration in range(first_iter, opt.iterations + 1):        
 
@@ -79,16 +75,22 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
-
-        if not viewpoint_sprical_stack:
-            viewpoint_sprical_stack = scene_sprical.getRenderCameras().copy()
-
-
         gt_image = viewpoint_cam.original_image.cuda()
 
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
+
+        bg_mask = None
+        if args.dataset == 'DTU':
+            if 'scan110' not in scene.source_path:
+                bg_mask = (gt_image.max(0, keepdim=True).values < 30/255)
+            else:
+                bg_mask = (gt_image.max(0, keepdim=True).values < 15/255)
+            bg_mask_clone = bg_mask.clone()
+            for i in range(1, 50):
+                bg_mask[:, i:] *= bg_mask_clone[:, :-i]
+            gt_image[bg_mask.repeat(3,1,1)] = 0.
 
         # -------------------------------------------------- DEPTH --------------------------------------------
         if iteration > opt.hard_depth_start:
@@ -98,13 +100,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Depth loss
             loss_hard = 0
             depth_mono = 255.0 - viewpoint_cam.depth_mono
+            if args.dataset == 'DTU':
+                depth_mono[bg_mask] = depth_mono[~bg_mask].mean()
+                depth[bg_mask] = depth[~bg_mask].mean().detach()
+
 
             loss_l2_dpt = patch_norm_mse_loss(depth[None,...], depth_mono[None,...], randint(patch_range[0], patch_range[1]), opt.error_tolerance)
             loss_hard += 0.1 * loss_l2_dpt
-
-            
-            if iteration > 3000:
-                loss_hard += 0.1 * loss_depth_smoothness(depth[None, ...], depth_mono[None, ...])
 
             loss_global = patch_norm_mse_loss_global(depth[None,...], depth_mono[None,...], randint(patch_range[0], patch_range[1]), opt.error_tolerance)
             loss_hard += 1 * loss_global
@@ -116,32 +118,47 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
-        # -------------------------------------------------- pnt --------------------------------------------
-        if iteration > opt.soft_depth_start :
+
+            # if iteration > opt.densify_from_iter:
+            #     gaussians.prune(opt.prune_threshold)
+
+
+        # -------------------------------------------------- soft --------------------------------------------
+        ema_loss_hard = 0.1 * (loss_hard.item()) + 0.9 * ema_loss_hard
+        if iteration > opt.soft_depth_start and ema_loss_hard < 0.1:
             render_pkg = render_for_opa(viewpoint_cam, gaussians, pipe, background)
             viewspace_point_tensor, visibility_filter = render_pkg["viewspace_points"], render_pkg["visibility_filter"]
             depth, alpha = render_pkg["depth"], render_pkg["alpha"]
 
             # Depth loss
-            loss_pnt = 0
+            loss_soft = 0
             depth_mono = 255.0 - viewpoint_cam.depth_mono
+            if args.dataset == 'DTU':
+                depth_mono[bg_mask] = depth_mono[~bg_mask].mean()
+                depth[bg_mask] = depth[~bg_mask].mean().detach()
 
             loss_l2_dpt = patch_norm_mse_loss(depth[None,...], depth_mono[None,...], randint(patch_range[0], patch_range[1]), opt.error_tolerance)
-            loss_pnt += 0.1 * loss_l2_dpt
-
-            if iteration > 3000:
-                loss_pnt += 0.1 * loss_depth_smoothness(depth[None, ...], depth_mono[None, ...])
+            loss_soft += 0.1 * loss_l2_dpt
 
             loss_global = patch_norm_mse_loss_global(depth[None,...], depth_mono[None,...], randint(patch_range[0], patch_range[1]), opt.error_tolerance)
-            loss_pnt += 1 * loss_global
+            loss_soft += 1 * loss_global
 
-            loss_pnt.backward()
+            loss_soft.backward()
 
             # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
         
+        
+        
+        if args.dataset == 'DTU':
+            render_pkg = render_for_opa(viewpoint_cam, gaussians, pipe, background)
+            (render_pkg["alpha"][bg_mask]**2).mean().backward()
+            gaussians.optimizer.step()
+            gaussians.optimizer.zero_grad(set_to_none = True)
+
+
 
         # ---------------------------------------------- Photometric --------------------------------------------
         
@@ -154,13 +171,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         Ll1 = l1_loss(image, gt_image)
         loss = Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
 
-
         # Reg
         loss_reg = torch.tensor(0., device=loss.device)
         shape_pena = (gaussians.get_scaling.max(dim=1).values / gaussians.get_scaling.min(dim=1).values).mean()
+        # scale_pena = (gaussians.get_scaling.max(dim=1).values).std()
         scale_pena = ((gaussians.get_scaling.max(dim=1, keepdim=True).values)**2).mean()
         opa_pena = 1 - (opacity[opacity > 0.2]**2).mean() + ((1 - opacity[opacity < 0.2])**2).mean()
 
+        # loss_reg += 0.01*shape_pena + 0.001*scale_pena + 0.01*opa_pena
         loss_reg += opt.shape_pena*shape_pena + opt.scale_pena*scale_pena + opt.opa_pena*opa_pena
         loss += loss_reg
 
@@ -183,7 +201,6 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Log and save
             clean_iterations = testing_iterations + [first_iter]
             clean_views(iteration, clean_iterations, scene, gaussians, pipe, background)
-            time_accum += iter_start.elapsed_time(iter_end)
             training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
@@ -197,30 +214,25 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:  
                     size_threshold = max_dist = None
+
+                    if args.dataset == "DTU":
+                        if 'scan110' not in scene.source_path:
+                            color = render(viewpoint_cam, gaussians, pipe, background)["color"]
+                            black_mask = color.max(-1, keepdim=True).values < 20/255
+                            gaussians.xyz_gradient_accum[black_mask] /= 10
+                            gaussians._opacity[black_mask] = gaussians.inverse_opacity_activation(torch.ones_like(gaussians._opacity[black_mask]) * 0.1)
+
+                            if 'scan114' not in scene.source_path and 'scan21' not in scene.source_path:
+                                white_mask = color.min(-1, keepdim=True).values > 240/255
+                                gaussians.xyz_gradient_accum[white_mask] /= 2
+                                
+                                if iteration % 2001 == 0:
+                                    gaussians._opacity[white_mask] = gaussians.inverse_opacity_activation(torch.ones_like(gaussians._opacity[white_mask]) * 0.1)
                             
                     gaussians.densify_and_prune(opt.densify_grad_threshold, opt.prune_threshold, scene.cameras_extent, size_threshold, opt.split_opacity_thresh, max_dist)
                 
                 # if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                 #     gaussians.reset_opacity()
-
-            if (iteration - 1) % 25 == 0:
-                viewpoint_sprical_cam = viewpoint_sprical_stack.pop(0)
-                mask_near = None
-                if iteration > 2000:
-                    for idx, view in enumerate(scene_sprical.getRenderCameras().copy()):
-                        mask_temp = (gaussians.get_xyz - view.camera_center.repeat(gaussians.get_xyz.shape[0], 1)).norm(dim=1, keepdim=True) < near_range
-                        mask_near = mask_near + mask_temp if mask_near is not None else mask_temp
-                    gaussians.prune_points(mask_near.squeeze())
-
-
-                ## render process
-                # if (iteration + 25) > (opt.iterations):
-                #     while viewpoint_sprical_stack:
-                #         render_one_step(iteration, time_accum / 1000, dataset, viewpoint_sprical_cam, gaussians, render, (pipe, background), save=False)
-                #         iteration += 1
-                #         viewpoint_sprical_cam = viewpoint_sprical_stack.pop(0)
-                # render_one_step(iteration, time_accum / 1000, dataset, viewpoint_sprical_cam, gaussians, render, (pipe, background), save=((iteration + 25) > (opt.iterations)))
-
 
             # Optimizer step
             if iteration < opt.iterations:
@@ -233,7 +245,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration == opt.iterations:
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt_latest.pth")
-            
+
 
 def prepare_output_and_logger(args, opt):    
     if not args.model_path:
@@ -328,47 +340,6 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
             tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
 
-
-
-def render_one_step(iteration, time, dataset, viewpoint, gaussians, renderFunc, renderArgs, save=False):
-    torch.cuda.empty_cache()
-    time_path = os.path.join(dataset.model_path, 'time')
-    makedirs(time_path, exist_ok=True)
-    render_results = renderFunc(viewpoint, gaussians, *renderArgs)
-    image = torch.clamp(render_results["render"], 0.0, 1.0)
-    torchvision.utils.save_image(image, os.path.join(time_path, '{0:05d}'.format(iteration) + ".png"))
-    
-    import matplotlib.font_manager as fm # to create font
-    from PIL import Image, ImageDraw, ImageFont  
-    
-    img = Image.open(os.path.join(time_path, '{0:05d}'.format(iteration) + ".png"))  
-    draw = ImageDraw.Draw(img)  
-    font = ImageFont.truetype(fm.findfont(fm.FontProperties(family='DejaVu Sans')), 30)  
-    text = format(time, '.2f') + ' s'
-    x = 10
-    y = 0 
-    draw.text((x-1, y), text, font=font, fill='black')  
-    draw.text((x+1, y), text, font=font, fill='black')  
-    draw.text((x, y-1), text, font=font, fill='black')  
-    draw.text((x, y+1), text, font=font, fill='black')  
-    draw.text((x-1, y-1), text, font=font, fill='black')  
-    draw.text((x+1, y-1), text, font=font, fill='black')  
-    draw.text((x-1, y+1), text, font=font, fill='black')  
-    draw.text((x+1, y+1), text, font=font, fill='black')  
-    draw.text((x, y), text, font=font, fill='white')
-
-    img.save(os.path.join(time_path, '{0:05d}'.format(iteration) + ".png"))
-
-
-    torch.cuda.empty_cache()
-    if save:
-        # os.system(f"ffmpeg -i " + time_path + f"/%5d.png -q 2 " + dataset.model_path + "/out_time_{}.mp4 -y".format(dataset.model_path.split('/')[-1]))
-        os.system(f'ffmpeg -f image2 -pattern_type glob -i "' + time_path + f'/*.png" -q 2 ' + dataset.model_path + "/out_time_{}.mp4 -y".format(dataset.model_path.split('/')[-1]))
-
-
-
-
-
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
@@ -379,12 +350,11 @@ if __name__ == "__main__":
     # parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[6000, 30000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[6000, 30000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1000, 2000, 3000, 6000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[1000, 2000, 3000, 6000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
-    parser.add_argument("--near", type=int, default=0)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     # args.checkpoint_iterations.append(args.iterations)
@@ -397,7 +367,7 @@ if __name__ == "__main__":
     # Start GUI server, configure and run training
     # network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.near)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
 
     # All done
     print("\nTraining complete.")

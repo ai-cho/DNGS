@@ -1,5 +1,5 @@
-base="output/dtu/"
-mask_path="data/dtu/submission_data/idrmasks"
+base="output/curated/"
+mask_path="data/curated/submission_data/idrmasks"
 
 for scan_id in scan30 scan34 scan41 scan45  scan82 scan103  scan38  scan21 scan40  scan55  scan63  scan31  scan8  scan110  scan114
 do  

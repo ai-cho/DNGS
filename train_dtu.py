@@ -104,6 +104,10 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 depth_mono[bg_mask] = depth_mono[~bg_mask].mean()
                 depth[bg_mask] = depth[~bg_mask].mean().detach()
 
+            if args.dataset == 'curated':
+                depth_mono[bg_mask] = depth_mono[~bg_mask].mean()
+                depth[bg_mask] = depth[~bg_mask].mean().detach()
+
 
             loss_l2_dpt = patch_norm_mse_loss(depth[None,...], depth_mono[None,...], randint(patch_range[0], patch_range[1]), opt.error_tolerance)
             loss_hard += 0.1 * loss_l2_dpt
