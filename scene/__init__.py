@@ -133,10 +133,10 @@ class RenderScene:
             scene_info = sceneLoadTypeCallbacks["SpiralDTU"](args.source_path)
         else:
             scene_info = sceneLoadTypeCallbacks["Spiral"](args.source_path)
-        #
+
+        # DTU setting으로 따라감.
         scene_info = sceneLoadTypeCallbacks["SpiralDTU"](args.source_path)
         #
-
 
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 

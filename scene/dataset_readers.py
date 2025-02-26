@@ -197,12 +197,12 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
                 train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if idx in idx_train]
                 test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in idx_test] + eval_cam_infos
 
-                # print('train', idx_train)
-                # print('test', train_cam_infos)
+
             else:
                 train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
                 test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
-            
+
+
         elif dataset == "DTU":
             train_idx = [25, 22, 28, 40, 44, 48, 0, 8, 13]
             exclude_idx = [3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 36, 37, 38, 39]
@@ -213,19 +213,26 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
             test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in test_idx]
             eval_cam_infos = test_cam_infos
 
-            print(len(train_cam_infos), len(eval_cam_infos))
 
         elif dataset == "curated":
             train_cam_infos = [c for c in cam_infos if "frame_1_" in c.image_path]  # Train: frame_1_00*.png
             eval_cam_infos = [c for c in cam_infos if "frame_0" in c.image_path]  # Test: frame_00*.png
             test_cam_infos = eval_cam_infos
-            print(len(train_cam_infos), len(eval_cam_infos))
 
         elif dataset == 'others':
             train_cam_infos = [c for c in cam_infos if "frame_0" in c.image_path]  # Train: frame_1_00*.png
             eval_cam_infos = [c for c in cam_infos if "frame_1_" in c.image_path]  # Test: frame_00*.png
             test_cam_infos = eval_cam_infos
-            print(len(train_cam_infos), len(eval_cam_infos))
+
+        elif dataset == 'explore1':
+            train_cam_infos = [c for c in cam_infos if "train" in c.image_path]
+            eval_cam_infos = [c for c in cam_infos if "explore1" in c.image_path]
+            test_cam_infos = eval_cam_infos
+
+        elif dataset == 'explore2':
+            train_cam_infos = [c for c in cam_infos if "train" in c.image_path]
+            eval_cam_infos = [c for c in cam_infos if "explore2" in c.image_path]
+            test_cam_infos = eval_cam_infos
 
         else:
             raise NotImplementedError
@@ -237,8 +244,8 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
     # print('train', [info.image_path for info in train_cam_infos])
     # print('eval', [info.image_path for info in eval_cam_infos])
 
-    print('len(train)', len(train_cam_infos))
-    print('len(eval)', len(eval_cam_infos))
+    # print('len(train)', len(train_cam_infos))
+    # print('len(eval)', len(eval_cam_infos))
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
     if rand_pcd and mvs_pcd:
@@ -247,6 +254,7 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
 
     if rand_pcd:
         print('Init random point cloud.')
+
         ply_path = os.path.join(path, "sparse/0/points3D_random.ply")
         bin_path = os.path.join(path, "sparse/0/points3D.bin")
         txt_path = os.path.join(path, "sparse/0/points3D.txt")
@@ -257,29 +265,15 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
             xyz, rgb, _ = read_points3D_text(txt_path)
         print(xyz.max(0), xyz.min(0))
 
-
-################## Random Point Cloud Generation ##################
-        
         if dataset == "LLFF":
             pcd_shape = (topk_(xyz, 1, 0)[-1] + topk_(-xyz, 1, 0)[-1])
             num_pts = int(pcd_shape.max() * 50)
             xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 20, 0)[-1]
-        elif dataset == "DTU":
+        # elif dataset == "DTU" or dataset == 'curated' or dataset == 'others':
+        else:    
             pcd_shape = (topk_(xyz, 100, 0)[-1] + topk_(-xyz, 100, 0)[-1])
             num_pts = 10_00
             xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 100, 0)[-1] # - 0.15 * pcd_shape
-
-        # 일단 LLFF 따라감.
-        elif dataset == "curated":
-            pcd_shape = (topk_(xyz, 1, 0)[-1] + topk_(-xyz, 1, 0)[-1])
-            num_pts = int(pcd_shape.max() * 50)
-            xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 20, 0)[-1]
-        
-        # 일단 LLFF 따라감.
-        elif dataset == "others":
-            pcd_shape = (topk_(xyz, 1, 0)[-1] + topk_(-xyz, 1, 0)[-1])
-            num_pts = int(pcd_shape.max() * 50)
-            xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 20, 0)[-1]     
 
         print(pcd_shape)
         print(f"Generating random point cloud ({num_pts})...")
@@ -287,14 +281,32 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
         shs = np.random.random((num_pts, 3)) / 255.0
         pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
         storePly(ply_path, xyz, SH2RGB(shs) * 255)
+
     elif mvs_pcd:
         ply_path = os.path.join(path, "3_views/dense/fused.ply")
         assert os.path.exists(ply_path)
         pcd = fetchPly(ply_path)
     else:
-        ply_path = os.path.join(path, "sparse/0/points3D.ply")
-        bin_path = os.path.join(path, "sparse/0/points3D.bin")
-        txt_path = os.path.join(path, "sparse/0/points3D.txt")
+        print("======= using our point cloud =======")
+        # curated
+        if dataset == "curated":
+            print('======================curated====================')
+            ply_path = os.path.join(path, "model_test/sparse/points3D_random.ply")
+            bin_path = os.path.join(path, "model_test/sparse/points3D.bin")
+            txt_path = os.path.join(path, "model_test/sparse/points3D.txt")
+
+        # others
+        elif dataset == 'others' or dataset == 'explore_1' or dataset == 'explore_2':
+            print('======================others====================')
+            ply_path = os.path.join(path, "model_train/sparse/points3D_random.ply")
+            bin_path = os.path.join(path, "model_train/sparse/points3D.bin")
+            txt_path = os.path.join(path, "model_train/sparse/points3D.txt")
+
+        else:
+            ply_path = os.path.join(path, "sparse/0/points3D_random.ply")
+            bin_path = os.path.join(path, "sparse/0/points3D.bin")
+            txt_path = os.path.join(path, "sparse/0/points3D.txt")
+
         if not os.path.exists(ply_path):
             print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
             try:
@@ -307,6 +319,10 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, llffhold
         except:
             pcd = None
 
+    print(f'len(train_cam_infos): {len(train_cam_infos)}') 
+    print(f'len(test_cam_infos): {len(test_cam_infos)}') 
+    print(f'len(eval_cam_infos): {len(eval_cam_infos)}') 
+    print('pcd:', pcd.points.shape)
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,

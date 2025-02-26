@@ -35,8 +35,8 @@ for SCENE in "aloe" "art" "flowers" "garbage" "picnic" "roses" ; do
                 --split_opacity_thresh 0.1 --error_tolerance 0.00025 \
                 --scaling_lr 0.003 \
                 --shape_pena 0.002 --opa_pena 0.001 \
-                --test_iterations 100 1000 2000 3000 4500 6000 10000 --save_iterations 100 500 1000 3000 6000 10000\
-                --near 10
+                --test_iterations 100 1000 2000 3000 4000 5000 6000 10000 --save_iterations 100 500 1000 3000 6000 10000\
+                # --near 10
 
     python render.py -s $dataset --model_path $workspace -r 2 --near 10  
     python spiral.py -s $dataset --model_path $workspace -r 2 --near 10 

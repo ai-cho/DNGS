@@ -30,7 +30,9 @@ elif args.benchmark=='curated':
     model_type = 'DPT_Large'
     scenes=['aloe', 'art', 'century', 'flowers', 'garbage', 'picnic', 'roses']
 elif args.benchmark=='others':
-    scenes = ['pipe', 'table']
+    model_type = 'DPT_Large'
+    scenes = ['bicycle', 'hat', 'print', 'study']
+    # scenes = ['pipe'] # 하나씩만 하는 경우
     
 midas = torch.hub.load("intel-isl/MiDaS", model_type)
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")

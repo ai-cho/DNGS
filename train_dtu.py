@@ -58,8 +58,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     ema_loss_hard = 0.0
 
-    if args.dataset == 'DTU':
-        patch_range = (17, 53)
+    # if args.dataset == 'DTU' or args.dataset == 'curated' or args.dataset == 'others':
+    patch_range = (17, 53)
 
     for iteration in range(first_iter, opt.iterations + 1):        
 
@@ -82,7 +82,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             pipe.debug = True
 
         bg_mask = None
-        if args.dataset == 'DTU':
+        if args.dataset == 'DTU': # or args.dataset == 'curated' or args.dataset == 'others':
             if 'scan110' not in scene.source_path:
                 bg_mask = (gt_image.max(0, keepdim=True).values < 30/255)
             else:
@@ -100,14 +100,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Depth loss
             loss_hard = 0
             depth_mono = 255.0 - viewpoint_cam.depth_mono
-            if args.dataset == 'DTU':
+            if args.dataset == 'DTU': #or args.dataset == 'others' or args.dataset == 'curated':
                 depth_mono[bg_mask] = depth_mono[~bg_mask].mean()
                 depth[bg_mask] = depth[~bg_mask].mean().detach()
-
-            if args.dataset == 'curated':
-                depth_mono[bg_mask] = depth_mono[~bg_mask].mean()
-                depth[bg_mask] = depth[~bg_mask].mean().detach()
-
 
             loss_l2_dpt = patch_norm_mse_loss(depth[None,...], depth_mono[None,...], randint(patch_range[0], patch_range[1]), opt.error_tolerance)
             loss_hard += 0.1 * loss_l2_dpt
@@ -137,7 +132,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Depth loss
             loss_soft = 0
             depth_mono = 255.0 - viewpoint_cam.depth_mono
-            if args.dataset == 'DTU':
+            if args.dataset == 'DTU':# or args.dataset == 'others' or args.dataset == 'curated':
                 depth_mono[bg_mask] = depth_mono[~bg_mask].mean()
                 depth[bg_mask] = depth[~bg_mask].mean().detach()
 
@@ -156,7 +151,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         
         
         
-        if args.dataset == 'DTU':
+        if args.dataset == 'DTU':# or args.dataset == 'curated' or args.dataset == 'others':
             render_pkg = render_for_opa(viewpoint_cam, gaussians, pipe, background)
             (render_pkg["alpha"][bg_mask]**2).mean().backward()
             gaussians.optimizer.step()
@@ -219,7 +214,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:  
                     size_threshold = max_dist = None
 
-                    if args.dataset == "DTU":
+                    if args.dataset == "DTU":# or args.dataset == "curated" or args.dataset == "others":
                         if 'scan110' not in scene.source_path:
                             color = render(viewpoint_cam, gaussians, pipe, background)["color"]
                             black_mask = color.max(-1, keepdim=True).values < 20/255
